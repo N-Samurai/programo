@@ -1,0 +1,85 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+
+# testing
+/coverage
+
+# production
+/build
+
+# misc
+.DS_Store
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Node modules
+node_modules/
+
+# Build output
+dist/
+build/
+
+# VSCode settings
+.vscode/
+
+# OS・エディタによる一時ファイル
+.DS_Store
+Thumbs.db
+
+# Tailwind / PostCSS キャッシュ（もしあれば）
+.postcss-cache/
+.tailwind-cache/
+
+# Log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# dotenv（必要に応じて）
+.env
+# --- 既存に加えて、よくある追加分 ---
+
+# TypeScript ビルド情報（incremental 時）
+*.tsbuildinfo
+
+# ESLint / Stylelint / Babel キャッシュ
+.eslintcache
+.stylelintcache
+.babel-cache/
+.cache/
+
+# JetBrains 系や VSCode 拡張の履歴
+.idea/
+.history/
+
+# OS
+desktop.ini
+
+# npm/yarn/pnpm の色々なログ
+pnpm-debug.log*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# dotenv は基本すべて無視し、テンプレだけ残す
+.env
+.env.*        # 例: .env.local, .env.development 等
+!.env.example # サンプルは追跡する（作っておくと吉）
+
+# ホスティング系（将来使う可能性に備え）
+.vercel/
+.netlify/
+
+# Turborepo / Parcel 等（今は未使用でも将来のため）
+.turbo/
+.parcel-cache/
