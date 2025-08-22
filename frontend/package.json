@@ -2,6 +2,10 @@
   "name": "frontend",
   "version": "0.1.0",
   "private": true,
+  "homepage": "./",
+  "description": "Outliner & Graph desktop app",
+  "author": "Your Name",
+  "main": "dist-electron/main.js",
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/modifiers": "^9.0.0",
@@ -15,6 +19,8 @@
     "@types/node": "^16.18.126",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
+    "cytoscape": "^3.33.1",
+    "electron-store": "^10.1.0",
     "react": "^19.1.0",
     "react-dnd": "^16.0.1",
     "react-dom": "^19.1.0",
@@ -28,7 +34,13 @@
     "start": "react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
-    "eject": "react-scripts eject"
+    "eject": "react-scripts eject",
+    "build:renderer": "react-scripts build",
+    "build:electron": "tsc -p electron/tsconfig.json",
+    "watch:electron": "tsc -w -p electron/tsconfig.json",
+    "fix:fsevents": "node -e \"require('fs').mkdirSync('node_modules/fsevents',{recursive:true})\"",
+    "electron:dev": "concurrently -k \"npm run start\" \"npm run watch:electron\" \"wait-on http://localhost:3000 && electron .\"",
+    "electron:build": "npm run build:renderer && npm run build:electron && npm run fix:fsevents && electron-builder"
   },
   "eslintConfig": {
     "extends": [
@@ -48,9 +60,48 @@
       "last 1 safari version"
     ]
   },
+  "build": {
+    "extends": null,
+    "appId": "com.example.frontend",
+    "productName": "Programo",
+    "files": [
+      "build/**",
+      "dist-electron/**",
+      "node_modules/**",
+      "!**/node_modules/fsevents/**"
+    ],
+    "directories": {
+      "buildResources": "build"
+    },
+    "asar": true,
+    "npmRebuild": false,
+    "extraMetadata": {
+      "main": "dist-electron/main.js"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ]
+    }
+  },
   "devDependencies": {
+    "@types/electron": "^1.6.0",
     "autoprefixer": "^10.4.21",
+    "concurrently": "^9.2.0",
+    "electron": "^37.3.1",
+    "electron-builder": "^26.0.12",
     "postcss": "^8.5.6",
-    "tailwindcss": "^3.4.1"
+    "tailwindcss": "^3.4.1",
+    "wait-on": "^8.0.4"
   }
 }

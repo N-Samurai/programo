@@ -83,3 +83,16 @@ yarn-error.log*
 # Turborepo / Parcel 等（今は未使用でも将来のため）
 .turbo/
 .parcel-cache/
+# Electron ビルド成果物
+/dist-electron
+/build
+
+# electron-builder の出力
+/dist
+/release
+/*.exe
+/*.dmg
+/*.AppImage
+
+# ローカルの環境ファイル
+.env
