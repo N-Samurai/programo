@@ -1,10 +1,10 @@
 {
   "name": "frontend",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "private": true,
   "homepage": "./",
   "description": "Outliner & Graph desktop app",
-  "author": "Your Name",
+  "author": "N-Samurai",
   "main": "dist-electron/main.js",
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -81,7 +81,8 @@
     "win": {
       "target": [
         "nsis"
-      ]
+      ],
+      "icon": "build/icon.ico"
     },
     "mac": {
       "target": [
@@ -91,7 +92,8 @@
     "linux": {
       "target": [
         "AppImage"
-      ]
+      ],
+      "icon": "build"
     }
   },
   "devDependencies": {

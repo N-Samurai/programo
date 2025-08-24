@@ -1,26 +1,40 @@
 // src/components/Outliner.tsx
-import React from "react";
+import React, { useMemo } from "react";
 import { useOutlineStore } from "../store/outline";
 import OutlineRow from "./OutlineRow";
 import { deriveAutoEdges } from "../lib/links";
 
 export default function Outliner() {
-  const { rootId, nodes } = useOutlineStore();
+  // セレクタを分けて購読（無駄な再レンダーやループを避ける）
+  const rootId = useOutlineStore((s) => s.rootId);
+  const nodes = useOutlineStore((s) => s.nodes);
 
-  const renderTree = (id: string, depth: number): React.ReactNode => {
+  // 循環（親子が誤ってループ）しても落ちないようガード
+  const renderTree = (
+    id: string,
+    depth: number,
+    visited = new Set<string>()
+  ): React.ReactNode => {
+    if (visited.has(id)) return null; // 循環防止
+    visited.add(id);
+
     const n = nodes[id];
+    if (!n) return null;
+
+    const nextDepth = depth + (id === rootId ? 0 : 1);
+
     return (
       <div key={id}>
         {id !== rootId && <OutlineRow id={id} depth={depth} />}
         {n.children.map((cid: string) =>
-          renderTree(cid, depth + (id === rootId ? 0 : 1))
+          renderTree(cid, nextDepth, new Set(visited))
         )}
       </div>
     );
   };
 
-  // （おまけ）右上に導出リンクの件数だけ表示
-  const edges = deriveAutoEdges(nodes);
+  // 導出リンクは nodes が変わった時だけ再計算
+  const edges = useMemo(() => deriveAutoEdges(nodes), [nodes]);
 
   return (
     <div className="h-full w-full overflow-auto bg-zinc-800 p-4">

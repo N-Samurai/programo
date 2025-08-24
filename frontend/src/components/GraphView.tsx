@@ -1,270 +1,179 @@
 // src/components/GraphView.tsx
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import cytoscape, { Core, ElementDefinition } from "cytoscape";
+import React, { useEffect, useMemo, useRef } from "react";
+import cytoscape, { Core, ElementsDefinition } from "cytoscape";
 import { useOutlineStore } from "../store/outline";
-import { deriveAutoEdges } from "../lib/links";
-
-type Id = string;
 
 export default function GraphView() {
-  const { rootId, nodes, selectedId, select } = useOutlineStore();
+  const rootId = useOutlineStore((s) => s.rootId);
+  const nodes = useOutlineStore((s) => s.nodes);
+
   const containerRef = useRef<HTMLDivElement | null>(null);
   const cyRef = useRef<Core | null>(null);
 
-  // 表示トグル
-  const [showSibling, setShowSibling] = useState(true);
-  const [showFirst, setShowFirst] = useState(true);
-  const [showManual, setShowManual] = useState(true);
-  const [showAuto, setShowAuto] = useState(false); // 既定ではOFF
+  // ------- エッジ生成（固定ルール） -------
+  const elements: ElementsDefinition = useMemo(() => {
+    const els: ElementsDefinition = { nodes: [], edges: [] };
 
-  // 親参照を作る（簡易インデックス）
-  const parentOf = useMemo<Record<Id, Id | null>>(() => {
-    const map: Record<Id, Id | null> = {};
-    Object.keys(nodes).forEach((pid) => {
-      const p = nodes[pid];
-      if (!p) return;
-      p.children.forEach((cid: string) => (map[cid] = pid));
-      if (!(pid in map)) map[pid] = null;
-    });
-    return map;
-  }, [nodes]);
-
-  const isAncestor = (a: Id, b: Id) => {
-    let cur: Id | null | undefined = parentOf[b];
-    while (cur) {
-      if (cur === a) return true;
-      cur = parentOf[cur];
-    }
-    return false;
-  };
-
-  // Outliner → Graph 変換
-  const elements = useMemo<ElementDefinition[]>(() => {
-    const els: ElementDefinition[] = [];
-
-    // ルートは表示しない（Outliner は root の子から描画しているため:contentReference[oaicite:0]{index=0}）
-    Object.keys(nodes).forEach((id) => {
-      if (id === rootId) return;
+    // ノード（ルート以外）
+    for (const id of Object.keys(nodes)) {
+      if (id === rootId) continue;
       const n = nodes[id];
-      if (!n) return;
-      els.push({ data: { id, label: n.name || id }, classes: "n" });
-    });
-
-    // 兄弟エッジ（順番にのみ接続）
-    if (showSibling) {
-      Object.keys(nodes).forEach((pid) => {
-        const p = nodes[pid];
-        if (!p) return;
-        const arr = p.children;
-        for (let i = 0; i < arr.length - 1; i++) {
-          const a = arr[i],
-            b = arr[i + 1];
-          if (!nodes[a] || !nodes[b]) continue;
-          if (a === rootId || b === rootId) continue;
-          els.push({
-            data: { id: `sib-${a}-${b}`, source: a, target: b, kind: "sib" },
-            classes: "e sib",
-          });
-        }
+      if (!n) continue;
+      els.nodes!.push({
+        data: { id, label: n.name || id },
+        classes: "normal",
       });
     }
 
-    // 親 → 最初の子（root は除外）
-    if (showFirst) {
-      Object.keys(nodes).forEach((pid) => {
-        if (pid === rootId) return;
-        const p = nodes[pid];
-        if (!p) return;
-        const first = p.children[0];
-        if (!first) return;
-        if (!nodes[first] || first === rootId) return;
-        els.push({
-          data: {
-            id: `first-${pid}-${first}`,
-            source: pid,
-            target: first,
-            kind: "first",
-          },
-          classes: "e first",
+    // 兄弟チェーン + 親→最初の子
+    for (const pid of Object.keys(nodes)) {
+      const p = nodes[pid];
+      if (!p) continue;
+      const kids = p.children ?? [];
+      if (kids.length === 0) continue;
+
+      // 親→最初の子（親がルートのときは線を出さないならここをスキップ）
+      if (pid !== rootId && nodes[kids[0]]) {
+        els.edges!.push({
+          data: { id: `pc:${pid}->${kids[0]}`, source: pid, target: kids[0] },
+          classes: "edge-parent-primary",
         });
-      });
+      }
+
+      // 兄弟の順でつなぐ
+      for (let i = 0; i < kids.length - 1; i++) {
+        const a = kids[i];
+        const b = kids[i + 1];
+        if (!nodes[a] || !nodes[b]) continue;
+        els.edges!.push({
+          data: { id: `sib:${a}->${b}`, source: a, target: b },
+          classes: "edge-sibling",
+        });
+      }
     }
 
-    // 手動リンク（[[...]]）
-    if (showManual) {
-      Object.keys(nodes).forEach((id) => {
-        if (id === rootId) return;
-        const n = nodes[id];
-        if (!n) return;
-        (n.manualLinks ?? []).forEach((to: string) => {
-          if (!nodes[to] || to === rootId) return;
-          els.push({
-            data: {
-              id: `manual-${id}-${to}`,
-              source: id,
-              target: to,
-              kind: "manual",
-            },
-            classes: "e manual",
-          });
+    // 手動リンク
+    for (const id of Object.keys(nodes)) {
+      if (id === rootId) continue;
+      const n = nodes[id];
+      if (!n) continue;
+      for (const to of n.manualLinks ?? []) {
+        if (!nodes[to] || to === id) continue;
+        els.edges!.push({
+          data: { id: `man:${id}->${to}`, source: id, target: to },
+          classes: "edge-manual",
         });
-      });
-    }
-
-    // 自動リンク（祖先-子孫は除外、兄弟には任意）
-    if (showAuto) {
-      const auto = deriveAutoEdges(nodes);
-      auto.forEach((e: { from: Id; to: Id; reason?: string }, i: number) => {
-        const { from, to } = e;
-        if (!nodes[from] || !nodes[to]) return;
-        if (from === rootId || to === rootId) return;
-        if (isAncestor(from, to) || isAncestor(to, from)) return;
-        els.push({
-          data: {
-            id: `auto-${i}-${from}-${to}`,
-            source: from,
-            target: to,
-            kind: "auto",
-            reason: e.reason ?? "",
-          },
-          classes: "e auto",
-        });
-      });
+      }
     }
 
     return els;
-  }, [nodes, rootId, showSibling, showFirst, showManual, showAuto, parentOf]);
+  }, [nodes, rootId]);
 
-  // 初期化
+  // ------- Cytoscape 初期化（1回だけ） -------
   useEffect(() => {
-    if (!containerRef.current) return;
-    cyRef.current?.destroy();
+    if (!containerRef.current || cyRef.current) return;
 
     const cy = cytoscape({
       container: containerRef.current,
-      elements,
+      elements: [], // 初期は空。後続エフェクトで追加
       wheelSensitivity: 0.2,
       style: [
+        // ノード
         {
-          selector: "node.n",
+          selector: "node",
           style: {
-            "background-color": "#4b6bfb",
-            "border-width": 0,
+            "background-color": "#4f46e5",
+            "border-width": 2,
+            "border-color": "#a5b4fc",
             label: "data(label)",
-            color: "#e5e7eb",
-            "font-size": 12,
-            "text-outline-width": 1,
-            "text-outline-color": "rgba(2,6,23,0.9)",
+            color: "#fff",
+            "font-size": 14,
+            "text-outline-width": 2,
+            "text-outline-color": "#4f46e5",
             "text-valign": "center",
             "text-halign": "center",
+            width: 44,
+            height: 44,
             shape: "round-rectangle",
-            padding: "6px 10px",
           },
         },
-        {
-          selector: "node.n:selected",
-          style: { "background-color": "#f59e0b" },
-        },
+        // style: [...] 内
 
+        // 兄弟
         {
-          selector: "edge.e",
+          selector: ".edge-sibling",
           style: {
-            width: 1.8,
-            "curve-style": "bezier",
-            "line-color": "rgba(148,163,184,0.5)",
-            "target-arrow-shape": "none",
+            width: 3,
+            "line-color": "#9ca3af",
+            "curve-style": "bezier", // 好みで "straight" でもOK
+            // "target-arrow-shape": "triangle",   ← 削除
+            // "target-arrow-color": "#9ca3af",    ← 削除
           },
         },
+        // 親→最初の子
         {
-          selector: "edge.sib",
-          style: { "line-color": "rgba(148,163,184,0.65)" },
-        },
-        {
-          selector: "edge.first",
-          style: { "line-color": "rgba(203,213,225,0.75)", width: 2 },
-        },
-        {
-          selector: "edge.manual",
-          style: { "line-color": "rgba(245,158,11,0.85)", width: 2 },
-        },
-        {
-          selector: "edge.auto",
+          selector: ".edge-parent-primary",
           style: {
-            "line-color": "rgba(34,197,94,0.6)",
-            "line-style": "dashed",
+            width: 2.5,
+            "line-color": "#cbd5e1",
+            "curve-style": "bezier",
+            // 矢印系削除
+          },
+        },
+        // 手動リンク
+        {
+          selector: ".edge-manual",
+          style: {
+            width: 3,
+            "line-color": "#f59e0b",
+            "curve-style": "bezier",
+            // 矢印系削除
           },
         },
       ],
-      layout: {
-        name: "cose",
-        animate: true,
-        padding: 20,
-        nodeRepulsion: () => 12000,
-        idealEdgeLength: () => 120,
-        gravity: 1,
-      },
+      layout: { name: "preset" } as any, // レイアウトは後で
     });
 
-    cy.on("select", "node", (evt) => select(evt.target.id()));
-
-    const obs = new ResizeObserver(() => cy.resize());
-    obs.observe(containerRef.current);
-
     cyRef.current = cy;
-    return () => {
-      obs.disconnect();
-      cy.destroy();
-    };
-  }, [elements, select]);
 
-  // Store選択 → Graph反映
+    return () => {
+      cyRef.current?.destroy();
+      cyRef.current = null;
+    };
+  }, []);
+
+  // ------- 要素の差し替え（nodes が変わったら） -------
   useEffect(() => {
     const cy = cyRef.current;
     if (!cy) return;
-    cy.nodes().unselect();
-    if (selectedId && cy.getElementById(selectedId).length > 0) {
-      const el = cy.getElementById(selectedId);
-      el.select();
-      cy.center(el);
-    }
-  }, [selectedId]);
+
+    cy.batch(() => {
+      cy.elements().remove();
+      if (elements.nodes) cy.add(elements.nodes as any);
+      if (elements.edges) cy.add(elements.edges as any);
+    });
+
+    const layout = cy.layout({
+      name: "cose",
+      animate: false,
+      padding: 30,
+      nodeRepulsion: 80000,
+      idealEdgeLength: 120,
+    } as any);
+
+    layout.run();
+
+    // ★ レイアウト終了後に全体を少し引きで表示
+    //   padding を大きめにすると“引き”になります（好みで 60〜120）
+    cy.fit(undefined, 80);
+
+    // さらに拡大し過ぎ防止（オプション）
+    cy.minZoom(0.3);
+    cy.maxZoom(2.5);
+  }, [elements]);
 
   return (
-    <div className="relative h-full w-full">
-      <div className="absolute right-3 top-3 z-10 flex gap-2 rounded-md bg-black/30 px-2 py-1 text-xs text-zinc-300 backdrop-blur">
-        <label className="flex items-center gap-1 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={showSibling}
-            onChange={(e) => setShowSibling(e.target.checked)}
-          />{" "}
-          Sibling
-        </label>
-        <label className="flex items-center gap-1 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={showFirst}
-            onChange={(e) => setShowFirst(e.target.checked)}
-          />{" "}
-          FirstChild
-        </label>
-        <label className="flex items-center gap-1 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={showManual}
-            onChange={(e) => setShowManual(e.target.checked)}
-          />{" "}
-          Manual
-        </label>
-        <label className="flex items-center gap-1 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={showAuto}
-            onChange={(e) => setShowAuto(e.target.checked)}
-          />{" "}
-          Auto
-        </label>
-      </div>
+    <div className="h-full w-full bg-zinc-900">
       <div ref={containerRef} className="h-full w-full" />
     </div>
   );
