@@ -1,180 +1,190 @@
-// src/components/GraphView.tsx
-import React, { useEffect, useMemo, useRef } from "react";
-import cytoscape, { Core, ElementsDefinition } from "cytoscape";
+import React, { useMemo, useState } from "react";
 import { useOutlineStore } from "../store/outline";
 
-export default function GraphView() {
+// ===============
+// CardGraphView
+// - Top row: children of the current focus node, laid out HORIZONTALLY as cards
+// - Inside each card: that node's direct children, laid out VERTICALLY (list)
+// - Deeper levels are hidden until you click (drill‑in). Click any item to
+//   make it the new focus. Includes a breadcrumb (Home → … → Focus).
+// ===============
+
+// Minimal node shape expected from the store
+// (matches what GraphView.tsx already uses: id, name, children[], manualLinks[])
+type OutlineNode = {
+  id: string;
+  name: string;
+  children?: string[];
+  manualLinks?: string[];
+};
+
+type NodesMap = Record<string, OutlineNode>;
+
+export default function CardGraphView() {
   const rootId = useOutlineStore((s) => s.rootId);
-  const nodes = useOutlineStore((s) => s.nodes);
+  const nodes = useOutlineStore((s) => s.nodes) as NodesMap;
 
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const cyRef = useRef<Core | null>(null);
+  // Which node we are centering the view on
+  const [focusId, setFocusId] = useState<string>(rootId);
 
-  // ------- エッジ生成（固定ルール） -------
-  const elements: ElementsDefinition = useMemo(() => {
-    const els: ElementsDefinition = { nodes: [], edges: [] };
+  // ---------- helpers ----------
+  const getNode = (id?: string) => (id ? nodes[id] : undefined);
+  const getChildren = (id?: string) =>
+    id && nodes[id]?.children
+      ? nodes[id]!.children!.filter((c) => !!nodes[c])
+      : [];
 
-    // ノード（ルート以外）
-    for (const id of Object.keys(nodes)) {
-      if (id === rootId) continue;
-      const n = nodes[id];
-      if (!n) continue;
-      els.nodes!.push({
-        data: { id, label: n.name || id },
-        classes: "normal",
-      });
-    }
+  // build ancestors path (root -> parent -> focus)
+  const breadcrumbs = useMemo(() => {
+    const path: string[] = [];
 
-    // 兄弟チェーン + 親→最初の子
-    for (const pid of Object.keys(nodes)) {
-      const p = nodes[pid];
-      if (!p) continue;
-      const kids = p.children ?? [];
-      if (kids.length === 0) continue;
+    if (!focusId) return path;
 
-      // 親→最初の子（親がルートのときは線を出さないならここをスキップ）
-      if (pid !== rootId && nodes[kids[0]]) {
-        els.edges!.push({
-          data: { id: `pc:${pid}->${kids[0]}`, source: pid, target: kids[0] },
-          classes: "edge-parent-primary",
-        });
+    // naive upward scan using parent lookup by search
+    const parentOf = (id: string) => {
+      for (const pid of Object.keys(nodes)) {
+        if (nodes[pid]?.children?.includes(id)) return pid;
       }
-
-      // 兄弟の順でつなぐ
-      for (let i = 0; i < kids.length - 1; i++) {
-        const a = kids[i];
-        const b = kids[i + 1];
-        if (!nodes[a] || !nodes[b]) continue;
-        els.edges!.push({
-          data: { id: `sib:${a}->${b}`, source: a, target: b },
-          classes: "edge-sibling",
-        });
-      }
-    }
-
-    // 手動リンク
-    for (const id of Object.keys(nodes)) {
-      if (id === rootId) continue;
-      const n = nodes[id];
-      if (!n) continue;
-      for (const to of n.manualLinks ?? []) {
-        if (!nodes[to] || to === id) continue;
-        els.edges!.push({
-          data: { id: `man:${id}->${to}`, source: id, target: to },
-          classes: "edge-manual",
-        });
-      }
-    }
-
-    return els;
-  }, [nodes, rootId]);
-
-  // ------- Cytoscape 初期化（1回だけ） -------
-  useEffect(() => {
-    if (!containerRef.current || cyRef.current) return;
-
-    const cy = cytoscape({
-      container: containerRef.current,
-      elements: [], // 初期は空。後続エフェクトで追加
-      wheelSensitivity: 0.2,
-      style: [
-        // ノード
-        {
-          selector: "node",
-          style: {
-            "background-color": "#4f46e5",
-            "border-width": 2,
-            "border-color": "#a5b4fc",
-            label: "data(label)",
-            color: "#fff",
-            "font-size": 14,
-            "text-outline-width": 2,
-            "text-outline-color": "#4f46e5",
-            "text-valign": "center",
-            "text-halign": "center",
-            width: 44,
-            height: 44,
-            shape: "round-rectangle",
-          },
-        },
-        // style: [...] 内
-
-        // 兄弟
-        {
-          selector: ".edge-sibling",
-          style: {
-            width: 3,
-            "line-color": "#9ca3af",
-            "curve-style": "bezier", // 好みで "straight" でもOK
-            // "target-arrow-shape": "triangle",   ← 削除
-            // "target-arrow-color": "#9ca3af",    ← 削除
-          },
-        },
-        // 親→最初の子
-        {
-          selector: ".edge-parent-primary",
-          style: {
-            width: 2.5,
-            "line-color": "#cbd5e1",
-            "curve-style": "bezier",
-            // 矢印系削除
-          },
-        },
-        // 手動リンク
-        {
-          selector: ".edge-manual",
-          style: {
-            width: 3,
-            "line-color": "#f59e0b",
-            "curve-style": "bezier",
-            // 矢印系削除
-          },
-        },
-      ],
-      layout: { name: "preset" } as any, // レイアウトは後で
-    });
-
-    cyRef.current = cy;
-
-    return () => {
-      cyRef.current?.destroy();
-      cyRef.current = null;
+      return undefined;
     };
-  }, []);
 
-  // ------- 要素の差し替え（nodes が変わったら） -------
-  useEffect(() => {
-    const cy = cyRef.current;
-    if (!cy) return;
+    let cur: string | undefined = focusId;
+    const stack: string[] = [];
+    while (cur) {
+      stack.push(cur);
+      if (cur === rootId) break;
+      cur = parentOf(cur);
+      if (!cur) break;
+    }
+    return stack.reverse();
+  }, [focusId, nodes, rootId]);
 
-    cy.batch(() => {
-      cy.elements().remove();
-      if (elements.nodes) cy.add(elements.nodes as any);
-      if (elements.edges) cy.add(elements.edges as any);
-    });
+  const focusChildren = useMemo(() => getChildren(focusId), [focusId, nodes]);
 
-    const layout = cy.layout({
-      name: "cose",
-      animate: false,
-      padding: 30,
-      nodeRepulsion: 80000,
-      idealEdgeLength: 120,
-    } as any);
+  // ---------- UI building blocks ----------
+  const Card: React.FC<
+    { id: string } & React.HTMLAttributes<HTMLDivElement>
+  > = ({ id, className = "", ...rest }) => {
+    const n = getNode(id);
+    if (!n) return null;
+    const kids = getChildren(id);
 
-    layout.run();
+    return (
+      <div
+        className={
+          "group relative min-w-[18rem] max-w-[22rem] rounded-2xl border border-zinc-700 bg-zinc-800/80 shadow-xl ring-1 ring-black/5 transition " +
+          "hover:border-zinc-500 hover:shadow-2xl " +
+          className
+        }
+        {...rest}
+      >
+        {/* Card header */}
+        <div className="flex items-start justify-between gap-2 px-4 pt-4">
+          <button
+            className="text-left text-zinc-100/95 hover:text-white focus:outline-none"
+            title="Drill into this node"
+            onClick={() => setFocusId(id)}
+          >
+            <div className="line-clamp-2 text-base font-semibold leading-tight">
+              {n.name || id}
+            </div>
+          </button>
 
-    // ★ レイアウト終了後に全体を少し引きで表示
-    //   padding を大きめにすると“引き”になります（好みで 60〜120）
-    cy.fit(undefined, 80);
+          {/* Small stats pill */}
+          <div className="ml-2 shrink-0 rounded-full bg-zinc-700/70 px-2 py-0.5 text-xs text-zinc-200">
+            {kids.length}
+          </div>
+        </div>
 
-    // さらに拡大し過ぎ防止（オプション）
-    cy.minZoom(0.3);
-    cy.maxZoom(2.5);
-  }, [elements]);
+        {/* Divider */}
+        <div className="mx-4 my-3 h-px bg-gradient-to-r from-transparent via-zinc-700 to-transparent" />
+
+        {/* Children list (vertical) */}
+        <div className="px-3 pb-3">
+          {kids.length === 0 ? (
+            <div className="px-2 py-3 text-sm text-zinc-400">No children</div>
+          ) : (
+            <ul className="flex max-h-56 flex-col gap-1 overflow-y-auto pr-1">
+              {kids.map((cid) => (
+                <li key={cid}>
+                  <button
+                    className="w-full rounded-lg px-2 py-1.5 text-left text-sm text-zinc-200 hover:bg-zinc-700/60 hover:text-white"
+                    onClick={() => setFocusId(cid)}
+                    title="Drill into this node"
+                  >
+                    <span className="line-clamp-1 align-middle">
+                      {nodes[cid]?.name || cid}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // ---------- render ----------
+  const focusNode = getNode(focusId);
 
   return (
-    <div className="h-full w-full bg-zinc-900">
-      <div ref={containerRef} className="h-full w-full" />
+    <div className="h-full w-full overflow-hidden bg-zinc-900 text-zinc-100">
+      {/* Top bar: breadcrumbs + actions */}
+      <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-zinc-800 bg-zinc-900/85 px-4 py-3 backdrop-blur">
+        {/* Home */}
+        <button
+          className="rounded-md border border-zinc-700 px-2 py-1 text-sm hover:border-zinc-500"
+          onClick={() => setFocusId(rootId)}
+          title="Go to root"
+        >
+          Home
+        </button>
+
+        {/* Breadcrumbs */}
+        <nav className="flex items-center gap-1 text-sm text-zinc-300">
+          {breadcrumbs.map((id, i) => (
+            <React.Fragment key={id}>
+              {i > 0 && <span className="text-zinc-600">/</span>}
+              <button
+                className={
+                  "rounded px-1.5 py-0.5 hover:bg-zinc-800 " +
+                  (i === breadcrumbs.length - 1 ? "text-zinc-200" : "")
+                }
+                onClick={() => setFocusId(id)}
+              >
+                {nodes[id]?.name || id}
+              </button>
+            </React.Fragment>
+          ))}
+        </nav>
+
+        <div className="ml-auto text-xs text-zinc-500">
+          Focus:{" "}
+          <span className="text-zinc-300">{focusNode?.name || focusId}</span>
+        </div>
+      </div>
+
+      {/* Content area */}
+      <div className="h-[calc(100%-48px)] overflow-auto">
+        {/* Row title */}
+        <div className="flex items-center justify-between px-4 pt-4">
+          <h2 className="text-sm font-semibold text-zinc-300">
+            Children of {focusNode?.name || focusId}
+          </h2>
+        </div>
+
+        {/* Horizontal scroller of cards */}
+        <div className="mt-3 flex gap-3 overflow-x-auto px-4 pb-6 [scrollbar-width:thin]">
+          {focusChildren.length === 0 ? (
+            <div className="px-2 py-12 text-zinc-500">
+              No children at this level
+            </div>
+          ) : (
+            focusChildren.map((id) => <Card key={id} id={id} />)
+          )}
+        </div>
+      </div>
     </div>
   );
 }
