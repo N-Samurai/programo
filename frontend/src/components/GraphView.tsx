@@ -59,7 +59,17 @@ export default function CardGraphView() {
     return stack.reverse();
   }, [focusId, nodes, rootId]);
 
-  const focusChildren = useMemo(() => getChildren(focusId), [focusId, nodes]);
+  const focusChildren = useMemo(
+    () => getChildren(focusId),
+    [focusId, getChildren]
+  );
+
+  // counts for current row and the next level (grandchildren)
+  const topCount = focusChildren.length;
+  const nextLevelTotal = useMemo(
+    () => focusChildren.reduce((acc, id) => acc + getChildren(id).length, 0),
+    [focusChildren, getChildren]
+  );
 
   // ---------- UI building blocks ----------
   const Card: React.FC<
@@ -71,24 +81,26 @@ export default function CardGraphView() {
 
     return (
       <div
+        role="button"
+        tabIndex={0}
+        onClick={() => setFocusId(id)}
+        onKeyDown={(e) =>
+          (e.key === "Enter" || e.key === " ") && setFocusId(id)
+        }
         className={
-          "group relative min-w-[18rem] max-w-[22rem] rounded-2xl border border-zinc-700 bg-zinc-800/80 shadow-xl ring-1 ring-black/5 transition " +
-          "hover:border-zinc-500 hover:shadow-2xl " +
+          "group relative min-w-[18rem] max-w-[22rem] rounded-2xl border border-zinc-700 bg-zinc-800/80 shadow-xl ring-1 ring-black/5 transition cursor-pointer " +
+          "hover:border-zinc-500 hover:shadow-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/60 " +
           className
         }
         {...rest}
       >
         {/* Card header */}
         <div className="flex items-start justify-between gap-2 px-4 pt-4">
-          <button
-            className="text-left text-zinc-100/95 hover:text-white focus:outline-none"
-            title="Drill into this node"
-            onClick={() => setFocusId(id)}
-          >
+          <div className="text-left text-zinc-100/95 group-hover:text-white">
             <div className="line-clamp-2 text-base font-semibold leading-tight">
               {n.name || id}
             </div>
-          </button>
+          </div>
 
           {/* Small stats pill */}
           <div className="ml-2 shrink-0 rounded-full bg-zinc-700/70 px-2 py-0.5 text-xs text-zinc-200">
@@ -104,7 +116,7 @@ export default function CardGraphView() {
           {kids.length === 0 ? (
             <div className="px-2 py-3 text-sm text-zinc-400">No children</div>
           ) : (
-            <ul className="flex max-h-56 flex-col gap-1 overflow-y-auto pr-1">
+            <ul className="flex flex-col gap-1 pr-1">
               {kids.map((cid) => (
                 <li key={cid}>
                   <button
@@ -170,7 +182,10 @@ export default function CardGraphView() {
         {/* Row title */}
         <div className="flex items-center justify-between px-4 pt-4">
           <h2 className="text-sm font-semibold text-zinc-300">
-            Children of {focusNode?.name || focusId}
+            Children of {focusNode?.name || focusId}{" "}
+            <span className="text-zinc-500">
+              (cards: {topCount}, next: {nextLevelTotal})
+            </span>
           </h2>
         </div>
 

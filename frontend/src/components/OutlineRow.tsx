@@ -1,5 +1,12 @@
 // src/components/OutlineRow.tsx
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useCallback,
+} from "react";
+
 import { useOutlineStore } from "../store/outline";
 import type { OutlineNode } from "../types/outline";
 import { resolveWikiLink } from "../lib/links";
@@ -68,7 +75,21 @@ export default function OutlineRow({ id, depth }: Props) {
     [nodes, rootId]
   );
   const suppressEnterRef = useRef(false);
-
+  // 画面に描画される順（深さ優先）で全ノードIDをフラット化（rootは除外）
+  const buildLinearOrder = useCallback((): string[] => {
+    const order: string[] = [];
+    const visited = new Set<string>();
+    const dfs = (nid: string) => {
+      if (visited.has(nid)) return;
+      visited.add(nid);
+      const node = nodes[nid];
+      if (!node) return;
+      if (nid !== rootId) order.push(nid);
+      for (const cid of node.children || []) dfs(cid);
+    };
+    if (rootId) dfs(rootId);
+    return order;
+  }, [nodes, rootId]);
   useEffect(() => {
     if (selectedId === id) ref.current?.focus();
   }, [selectedId, id]);
@@ -298,20 +319,20 @@ export default function OutlineRow({ id, depth }: Props) {
       }
     }
 
-    // ↑↓: 兄弟間のフォーカス移動（任意）
+    // ↑↓: 階層無視の直前/直後へ移動（深さ優先でフラット化した順序）
     if (e.key === "ArrowUp" || e.key === "ArrowDown") {
       e.preventDefault();
-      const pt = getParentId(id);
-      if (!pt) return;
-      const siblings = nodes[pt].children;
-      const idx = siblings.indexOf(id);
-      if (e.key === "ArrowUp" && idx > 0) select(siblings[idx - 1]);
-      if (e.key === "ArrowDown" && idx < siblings.length - 1)
-        select(siblings[idx + 1]);
+      const order = buildLinearOrder();
+      const idx = order.indexOf(id);
+      if (idx === -1) return;
+      if (e.key === "ArrowUp" && idx > 0) {
+        select(order[idx - 1]);
+      } else if (e.key === "ArrowDown" && idx < order.length - 1) {
+        select(order[idx + 1]);
+      }
       return;
     }
   };
-
   // DnD（同一親内）
   const onDragStart = (e: React.DragEvent) => {
     dragIdRef.current = id;
